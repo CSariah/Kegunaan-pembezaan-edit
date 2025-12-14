@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Misi Penyiasatan Kalkulus</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Font -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .animate-fade-in { animation: fadeIn 0.8s ease-out; }
+        .animate-slide-up { animation: slideUp 0.5s ease-out; }
+        .animate-pulse-slow { animation: pulseSlow 3s infinite; }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulseSlow { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.6; } }
+        
+        .scanlines {
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1));
+            background-size: 100% 4px;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 5;
+        }
+        
+        .loader {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 overflow-x-hidden">
+
+    <div id="root" class="min-h-screen flex flex-col items-center justify-center relative z-10">
+        <!-- Initial Loading UI -->
+        <div class="flex flex-col items-center">
+            <div class="loader mb-4"></div>
+            <div class="text-blue-400 font-mono text-sm tracking-widest animate-pulse">INITIALIZING SYSTEM...</div>
+        </div>
+    </div>
+
+    <div class="scanlines"></div>
+    <div class="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-0">
+        <div class="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-900/20 rounded-full blur-[120px]"></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        window.firebaseModules = {
+            initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken,
+            getFirestore, collection, addDoc, onSnapshot, serverTimestamp
+        };
+    </script>
+
+    <script type="text/babel">
+        // --- Smart Waiter ---
+        function waitForFirebase() {
+            if (window.firebaseModules) {
+                startApp();
+            } else {
+                setTimeout(waitForFirebase, 100);
+            }
+        }
+
+        function startApp() {
+            const { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken,
+                    getFirestore, collection, addDoc, onSnapshot, serverTimestamp } = window.firebaseModules;
+
+            // --- FIREBASE CONFIG ---
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+            
+            // Safe Init
+            let app, auth, db;
+            try {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            } catch(e) { console.error("Firebase init error", e); }
+            
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+            // --- ICONS ---
+            const Icons = {
+                Search: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>,
+                FileText: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>,
+                Badge: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M12 2l8 4.25v7.25a8.7 8.7 0 0 1-3.6 7l-4.4 2.5-4.4-2.5a8.7 8.7 0 0 1-3.6-7V6.25L12 2z"></path></svg>,
+                Activity: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>,
+                ArrowRight: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>,
+                RotateCcw: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>,
+                CheckCircle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>,
+                XCircle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+            };
+
+            // --- MATH HELPERS ---
+            const formatEquationStr = (a, b, c) => {
+                let str = `y = `;
+                if (a === 1) str += `x²`;
+                else if (a === -1) str += `-x²`;
+                else str += `${a}x²`;
+                if (b !== 0) {
+                    const sign = b > 0 ? ' + ' : ' - ';
+                    const val = Math.abs(b) === 1 ? '' : Math.abs(b);
+                    str += `${sign}${val}x`;
+                }
+                if (c !== 0) {
+                    const sign = c > 0 ? ' + ' : ' - ';
+                    str += `${sign}${Math.abs(c)}`;
+                }
+                return str;
+            };
+
+            const formatDerivStr = (a2, b) => {
+                let str = '';
+                const coeffA = a2;
+                if (coeffA !== 0) {
+                    if (coeffA === 1) str += `x`;
+                    else if (coeffA === -1) str += `-x`;
+                    else str += `${coeffA}x`;
+                }
+                if (b !== 0) {
+                    const sign = b > 0 ? '+' : '-';
+                    str += `${sign}${Math.abs(b)}`;
+                }
+                return str;
+            };
+
+            const generateQuestions = () => {
+                const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+                // Mission 1: Gradient
+                const mission1 = [];
+                for (let i = 0; i < 3; i++) {
+                    const a = randomInt(1, 3) * (Math.random() < 0.5 ? 1 : -1);
+                    const b = randomInt(0, 5) * (Math.random() < 0.5 ? 1 : -1); 
+                    const c = randomInt(0, 10);
+                    const x = randomInt(1, 3);
+                    const derivCoeff = 2 * a;
+                    const derivConst = b;
+                    const gradient = (derivCoeff * x) + derivConst;
+                    let derivAnsStr = formatDerivStr(derivCoeff, derivConst);
+
+                    mission1.push({
+                        type: 'gradient',
+                        equation: formatEquationStr(a, b, c),
+                        question_ms_1: `SUSPEK DIKESAN. Jejaknya mengikut lengkung ini. Nyahkod fungsi kecerunan (dy/dx) untuk menjejaknya.`,
+                        question_en_1: `SUSPECT SPOTTED. Their trail follows this curve. Decode the gradient function (dy/dx) to track them.`,
+                        question_ms_2: `KERJA BAGUS DETEKTIF! Sekarang, kira arah larian (kecerunan) tepat pada koordinat x = ${x}.`,
+                        question_en_2: `GOOD JOB DETECTIVE! Now, calculate the exact escape direction (gradient) at x = ${x}.`,
+                        answer_deriv: derivAnsStr, answer_val: gradient,
+                        hint_deriv: `dy/dx = 2ax + b`, hint_val: `Gantikan x=${x} ke dalam dy/dx`
+                    });
+                }
+
+                // Mission 2: Turning Point
+                const mission2 = [];
+                for (let i = 0; i < 3; i++) {
+                    const root = randomInt(-4, 4);
+                    const b = -2 * root;
+                    const c = randomInt(1, 10); 
+                    const derivCoeff = 2;
+                    const derivConst = b;
+                    let derivAnsStr = formatDerivStr(derivCoeff, derivConst);
+                    const y_val = (root * root) + (b * root) + c;
+
+                    mission2.push({
+                        type: 'turning_point',
+                        equation: formatEquationStr(1, b, c),
+                        question_ms_1: `SUSPEK BERPUSING! Analisis fungsi perubahan arah (dy/dx) untuk menyiasat pusingan ini.`,
+                        question_en_1: `SUSPECT U-TURN! Analyze the direction change function (dy/dx) to investigate this turn.`,
+                        question_ms_2: `PUSINGAN DIKESAN. Sekarang, cari nilai x di mana suspek berpusing (apabila dy/dx = 0).`,
+                        question_en_2: `TURN DETECTED. Now, find the x-value where the suspect turned (when dy/dx = 0).`,
+                        question_ms_3: `KOORDINAT LENGKAP DIPERLUKAN. Tentukan koordinat (x, y) tepat lokasi pusingan tersebut.`,
+                        question_en_3: `FULL COORDINATES REQUIRED. Determine the exact (x, y) coordinates of the turn.`,
+                        answer_deriv: derivAnsStr, answer_val: root, answer_y: y_val,
+                        hint_deriv: `dy/dx = 2x + b`, hint_val: `Selesaikan: 2x + b = 0`, hint_coord: `Gantikan x=${root} ke dalam persamaan asal y`
+                    });
+                }
+
+                // Mission 3: Nature
+                const mission3 = [];
+                for (let i = 0; i < 4; i++) {
+                    const isMin = Math.random() < 0.5;
+                    const a = isMin ? randomInt(1, 3) : randomInt(-3, -1);
+                    const b = randomInt(-5, 5);
+                    const c = randomInt(1, 10); 
+                    const derivCoeff = 2 * a;
+                    const derivConst = b;
+                    const derivAnsStr = formatDerivStr(derivCoeff, derivConst);
+                    const secondDeriv = 2 * a;
+
+                    mission3.push({
+                        type: 'nature',
+                        equation: formatEquationStr(a, b, c),
+                        question_ms_1: `KAMI JUMPA PERSEMBUNYIAN. Dapatkan fungsi kecerunan (dy/dx) untuk memulakan analisis topografi.`,
+                        question_en_1: `HIDEOUT FOUND. Obtain the gradient function (dy/dx) to start topography analysis.`,
+                        question_ms_2: `FUNGSI KECERUNAN DIPEROLEHI. Sekarang, cari terbitan kedua (d²y/dx²) untuk menentukan kecekungan.`,
+                        question_en_2: `GRADIENT FUNCTION OBTAINED. Now, find the second derivative (d²y/dx²) to determine concavity.`,
+                        question_ms_3: `ANALISIS TERAKHIR. Berdasarkan terbitan kedua, adakah ia di Lembah (Min) atau di Puncak (Max)?`,
+                        question_en_3: `FINAL ANALYSIS. Based on the second derivative, is it in a Valley (Min) or on a Peak (Max)?`,
+                        answer_deriv: derivAnsStr, answer_second_deriv: secondDeriv, answer_nature: isMin ? 'min' : 'max',
+                        hint_deriv: `dy/dx = 2ax + b`, hint_second_deriv: `Bezakan dy/dx sekali lagi`, hint_nature: `Jika d²y/dx² > 0: Min, Jika < 0: Max`
+                    });
+                }
+                return [...mission1, ...mission2, ...mission3];
+            };
+
+            function CalculusGame() {
+                const [user, setUser] = React.useState(null);
+                const [gameState, setGameState] = React.useState('welcome');
+                const [lang, setLang] = React.useState('ms');
+                const [playerName, setPlayerName] = React.useState('');
+                const [questions, setQuestions] = React.useState([]);
+                const [currentQIndex, setCurrentQIndex] = React.useState(0);
+                const [missionStep, setMissionStep] = React.useState(0);
+                const [score, setScore] = React.useState(0);
+                const [inputAns, setInputAns] = React.useState('');
+                const [feedback, setFeedback] = React.useState(null);
+                const [leaderboard, setLeaderboard] = React.useState([]);
+                const [loadingLB, setLoadingLB] = React.useState(false);
+                const [firebaseReady, setFirebaseReady] = React.useState(false);
+
+                // Firebase Initialization in Background
+                React.useEffect(() => {
+                    const initFirebase = async () => {
+                        const fb = window.firebaseModules;
+                        if (fb && fb.initializeApp) {
+                            try {
+                                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+                                // Use dummy config if undefined so init doesn't crash app (will fail silently on DB calls)
+                                const safeConfig = Object.keys(firebaseConfig).length > 0 ? firebaseConfig : { apiKey: "dummy", projectId: "dummy" };
+                                
+                                const app = fb.initializeApp(safeConfig);
+                                const auth = fb.getAuth(app);
+                                const db = fb.getFirestore(app);
+                                
+                                fb.onAuthStateChanged(auth, setUser);
+                                
+                                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                    await fb.signInWithCustomToken(auth, __initial_auth_token);
+                                } else {
+                                    await fb.signInAnonymously(auth);
+                                }
+                                setFirebaseReady(true);
+                            } catch (e) {
+                                console.log("Offline Mode: Firebase not ready yet or config missing.");
+                            }
+                        }
+                    };
+                    initFirebase();
+                }, []);
+
+                // Leaderboard Fetcher
+                React.useEffect(() => {
+                    const fb = window.firebaseModules;
+                    if (!user || !firebaseReady || !fb) return;
+                    
+                    setLoadingLB(true);
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    
+                    try {
+                        const lbRef = fb.collection(fb.getFirestore(), 'artifacts', appId, 'public', 'data', 'calculus_detective_lb');
+                        const unsubscribe = fb.onSnapshot(lbRef, (snapshot) => {
+                            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                            data.sort((a, b) => b.score - a.score);
+                            setLeaderboard(data.slice(0, 5));
+                            setLoadingLB(false);
+                        }, (err) => { setLoadingLB(false); });
+                        return () => unsubscribe();
+                    } catch(e) { setLoadingLB(false); }
+                }, [user, firebaseReady]);
+
+                const t = {
+                    ms: {
+                        title: 'FAIL SULIT: KES 001', subtitle: 'Biro Penyiasatan Kalkulus', nameLabel: 'Nama Kod Detektif',
+                        startBtn: 'Terima Misi', mission1: 'MISI 1: JEJAK KECERUNAN', mission2: 'MISI 2: TITIK PUSINGAN', mission3: 'MISI 3: ANALISIS TOPOGRAFI', 
+                        submit: 'Hantar Laporan', next: 'Siasatan Lanjut', score: 'Prestasi', gameOver: 'KES DITUTUP', playAgain: 'Siasat Kes Baru', 
+                        viewLeaderboard: 'Rekod Detektif Terbaik', leaderboardTitle: 'Ejen Terbaik', correct: 'Klu Disahkan!', wrong: 'Data Tidak Sepadan.',
+                        hint: 'Bantuan Ibu Pejabat', back: 'Kembali ke Pangkalan', loading: 'Mengakses Pangkalan Data...',
+                        deriv_label: 'Masukkan Formula (dy/dx)', second_deriv_label: 'Masukkan Terbitan Kedua (d²y/dx²)', coord_label: 'Masukkan Koordinat (x, y)'
+                    },
+                    en: {
+                        title: 'CLASSIFIED: CASE 001', subtitle: 'Calculus Investigation Bureau', nameLabel: 'Detective Code Name',
+                        startBtn: 'Accept Mission', mission1: 'MISSION 1: GRADIENT TRAIL', mission2: 'MISSION 2: TURNING POINT', mission3: 'MISSION 3: TOPOGRAPHY ANALYSIS', 
+                        submit: 'Submit Report', next: 'Next Clue', score: 'Performance', gameOver: 'CASE CLOSED', playAgain: 'New Investigation', 
+                        viewLeaderboard: 'Top Detectives', leaderboardTitle: 'Top Agents', correct: 'Clue Verified!', wrong: 'Mismatch Data.',
+                        hint: 'HQ Support', back: 'Return to Base', loading: 'Accessing Database...',
+                        deriv_label: 'Enter Formula (dy/dx)', second_deriv_label: 'Enter Second Derivative (d²y/dx²)', coord_label: 'Enter Coordinate (x, y)'
+                    }
+                };
+                const txt = t[lang];
+
+                const startGame = () => {
+                    if (!playerName.trim()) return;
+                    setQuestions(generateQuestions());
+                    setCurrentQIndex(0); setMissionStep(0); setScore(0);
+                    setFeedback(null); setInputAns(''); setGameState('playing');
+                };
+
+                const checkAnswer = () => {
+                    const currentQ = questions[currentQIndex];
+                    let isCorrect = false;
+
+                    if (currentQ.type === 'gradient') {
+                        if (missionStep === 0) {
+                            const cleanInput = inputAns.replace(/\s+/g, '').toLowerCase();
+                            const cleanAns = currentQ.answer_deriv.replace(/\s+/g, '').toLowerCase();
+                            if (cleanInput === cleanAns) isCorrect = true;
+                        } else {
+                            if (parseInt(inputAns) === currentQ.answer_val) isCorrect = true;
+                        }
+                    } 
+                    else if (currentQ.type === 'turning_point') {
+                        if (missionStep === 0) {
+                            const cleanInput = inputAns.replace(/\s+/g, '').toLowerCase();
+                            const cleanAns = currentQ.answer_deriv.replace(/\s+/g, '').toLowerCase();
+                            if (cleanInput === cleanAns) isCorrect = true;
+                        } else if (missionStep === 1) {
+                            if (parseInt(inputAns) === currentQ.answer_val) isCorrect = true;
+                        } else {
+                            const cleanInput = inputAns.replace(/[()\s]/g, '');
+                            const expected = `${currentQ.answer_val},${currentQ.answer_y}`;
+                            if (cleanInput === expected) isCorrect = true;
+                        }
+                    }
+                    else if (currentQ.type === 'nature') {
+                        if (missionStep === 0) {
+                            const cleanInput = inputAns.replace(/\s+/g, '').toLowerCase();
+                            const cleanAns = currentQ.answer_deriv.replace(/\s+/g, '').toLowerCase();
+                            if (cleanInput === cleanAns) isCorrect = true;
+                        } else if (missionStep === 1) {
+                            if (parseInt(inputAns) === currentQ.answer_second_deriv) isCorrect = true;
+                        } else {
+                            if (inputAns.toLowerCase() === currentQ.answer_nature) isCorrect = true;
+                        }
+                    } 
+
+                    if (isCorrect) {
+                        let isPartial = false;
+                        if (currentQ.type === 'gradient' && missionStep === 0) isPartial = true;
+                        else if (currentQ.type === 'turning_point' && missionStep < 2) isPartial = true;
+                        else if (currentQ.type === 'nature' && missionStep < 2) isPartial = true;
+
+                        if (isPartial) {
+                            setFeedback({ type: 'success', msg: txt.correct + ` [Phase ${missionStep + 1} Complete]` });
+                        } else {
+                            setScore(prev => prev + 1);
+                            setFeedback({ type: 'success', msg: txt.correct });
+                        }
+                    } else {
+                        let hintMsg = currentQ.hint;
+                        if (currentQ.type === 'gradient') {
+                            hintMsg = (missionStep === 0) ? currentQ.hint_deriv : currentQ.hint_val;
+                        } else if (currentQ.type === 'turning_point') {
+                            if(missionStep === 0) hintMsg = currentQ.hint_deriv;
+                            else if(missionStep === 1) hintMsg = currentQ.hint_val;
+                            else hintMsg = currentQ.hint_coord;
+                        } else if (currentQ.type === 'nature') {
+                            if(missionStep === 0) hintMsg = currentQ.hint_deriv;
+                            else if(missionStep === 1) hintMsg = currentQ.hint_second_deriv;
+                            else hintMsg = currentQ.hint_nature;
+                        }
+                        setFeedback({ type: 'error', msg: `${txt.wrong} [INFO: ${hintMsg}]` });
+                    }
+                };
+
+                const nextAction = () => {
+                    const currentQ = questions[currentQIndex];
+                    let nextStep = false;
+                    if (currentQ.type === 'gradient' && missionStep === 0) nextStep = true;
+                    else if (currentQ.type === 'turning_point' && missionStep < 2) nextStep = true;
+                    else if (currentQ.type === 'nature' && missionStep < 2) nextStep = true;
+
+                    if (nextStep) {
+                        setMissionStep(prev => prev + 1); setInputAns(''); setFeedback(null);
+                    } else {
+                        if (currentQIndex < questions.length - 1) {
+                            setCurrentQIndex(prev => prev + 1); setMissionStep(0); setInputAns(''); setFeedback(null);
+                        } else {
+                            finishGame();
+                        }
+                    }
+                };
+
+                const finishGame = async () => {
+                    const totalQ = questions.length;
+                    const finalScoreVal = Math.round((score / totalQ) * 100);
+                    const fb = window.firebaseModules;
+                    if (user && firebaseReady && finalScoreVal > 0 && fb) {
+                        try {
+                            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                            await fb.addDoc(fb.collection(fb.getFirestore(), 'artifacts', appId, 'public', 'data', 'calculus_detective_lb'), {
+                                name: playerName, score: finalScoreVal, lang: lang, timestamp: fb.serverTimestamp()
+                            });
+                        } catch (e) { console.error("Score save failed", e); }
+                    }
+                    setGameState('result');
+                };
+
+                const getMissionTitle = (index) => {
+                    if (index < 3) return txt.mission1;
+                    if (index < 6) return txt.mission2;
+                    return txt.mission3;
+                };
+
+                const percentage = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
+
+                // --- RENDERING ---
+                const renderWelcome = () => (
+                    <div className="flex flex-col items-center space-y-8 w-full max-w-md animate-fade-in relative z-10">
+                        <div className="flex justify-center mb-4"><div className="bg-blue-500/20 p-4 rounded-full border-2 border-blue-400 animate-pulse-slow"><Icons.Badge width={64} height={64} className="text-blue-300" /></div></div>
+                        <div className="text-center space-y-2">
+                            <div className="inline-block bg-red-900/50 text-red-300 px-3 py-1 rounded text-xs font-mono mb-2 tracking-widest border border-red-500/30">TOP SECRET</div>
+                            <h1 className="text-4xl font-bold tracking-tighter uppercase font-mono">{txt.title}</h1>
+                            <p className="text-slate-400 font-mono text-sm tracking-widest">{txt.subtitle}</p>
+                        </div>
+                        <div className="bg-slate-800/80 backdrop-blur-md p-8 rounded-sm w-full border border-slate-600 shadow-2xl relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent"></div>
+                            <div className="flex justify-center space-x-4 mb-8">
+                                <button onClick={() => setLang('ms')} className={`px-4 py-1 text-sm font-mono transition-all border ${lang === 'ms' ? 'bg-blue-900/50 border-blue-400 text-blue-200' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}>BAHASA MELAYU</button>
+                                <button onClick={() => setLang('en')} className={`px-4 py-1 text-sm font-mono transition-all border ${lang === 'en' ? 'bg-blue-900/50 border-blue-400 text-blue-200' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}>ENGLISH</button>
+                            </div>
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-xs font-mono text-slate-400 mb-2 uppercase tracking-widest">{txt.nameLabel}</label>
+                                    <div className="relative group">
+                                        <div className="absolute left-3 top-3 text-slate-500 group-focus-within:text-blue-400 transition-colors"><Icons.Search width={20} /></div>
+                                        <input type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-sm py-3 pl-10 pr-4 text-white font-mono placeholder-slate-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all uppercase" placeholder="AGENT NAME..." />
+                                    </div>
+                                </div>
+                                <button onClick={startGame} disabled={!playerName.trim()} className="w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-4 rounded-sm shadow-lg transition disabled:opacity-50 flex justify-center items-center gap-3 uppercase tracking-wider font-mono border-b-4 border-blue-900 active:border-b-0 active:translate-y-1"><Icons.FileText width={20} /> {txt.startBtn}</button>
+                                <button onClick={() => setGameState('leaderboard')} className="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold py-3 rounded-sm border border-slate-600 transition flex justify-center items-center gap-2 uppercase font-mono text-sm"><Icons.Badge width={16} /> {txt.viewLeaderboard}</button>
+                            </div>
+                        </div>
+                    </div>
+                );
+
+                const renderGame = () => {
+                    const currentQ = questions[currentQIndex];
+                    if (!currentQ) return null;
+
+                    let questionText = "";
+                    if (currentQ.type === 'gradient') {
+                        questionText = missionStep === 0 ? (lang === 'ms' ? currentQ.question_ms_1 : currentQ.question_en_1) : (lang === 'ms' ? currentQ.question_ms_2 : currentQ.question_en_2);
+                    } else if (currentQ.type === 'turning_point') {
+                        if (missionStep === 0) questionText = lang === 'ms' ? currentQ.question_ms_1 : currentQ.question_en_1;
+                        else if (missionStep === 1) questionText = lang === 'ms' ? currentQ.question_ms_2 : currentQ.question_en_2;
+                        else questionText = lang === 'ms' ? currentQ.question_ms_3 : currentQ.question_en_3;
+                    } else if (currentQ.type === 'nature') {
+                        if (missionStep === 0) questionText = lang === 'ms' ? currentQ.question_ms_1 : currentQ.question_en_1;
+                        else if (missionStep === 1) questionText = lang === 'ms' ? currentQ.question_ms_2 : currentQ.question_en_2;
+                        else questionText = lang === 'ms' ? currentQ.question_ms_3 : currentQ.question_en_3;
+                    }
+
+                    const isDerivStep = (currentQ.type === 'gradient' && missionStep === 0) || (currentQ.type === 'turning_point' && missionStep === 0) || (currentQ.type === 'nature' && missionStep === 0);
+                    const isCoordStep = (currentQ.type === 'turning_point' && missionStep === 2);
+                    const isNatureFinal = (currentQ.type === 'nature' && missionStep === 2);
+                    const placeholder = isDerivStep ? "2x + 5" : isCoordStep ? "(2, 4)" : "?";
+                    const inputType = (isDerivStep || isCoordStep) ? "text" : "number";
+
+                    return (
+                        <div className="w-full max-w-2xl animate-slide-up relative z-10">
+                            <div className="flex justify-between items-center mb-4 text-blue-300 font-mono text-xs uppercase tracking-wider">
+                                <span className="bg-blue-900/40 px-3 py-1 border border-blue-500/30 flex items-center gap-2"><Icons.Search width={14} /> {getMissionTitle(currentQIndex)}</span>
+                                <span className="flex items-center gap-2 text-slate-400"><Icons.Activity width={14} /> FILE {currentQIndex + 1} / {questions.length}</span>
+                            </div>
+                            <div className="bg-slate-800/90 backdrop-blur-md border border-slate-600 rounded-sm p-1 shadow-2xl">
+                                <div className="border border-slate-700 p-6 md:p-8 rounded-sm bg-slate-900/50">
+                                    <div className="flex items-start gap-4 mb-6">
+                                        <div className="hidden md:block bg-slate-700 p-2 rounded-full"><Icons.FileText className="text-slate-400" /></div>
+                                        <div><h2 className="text-lg md:text-xl text-slate-200 mb-2 font-light leading-relaxed font-mono">{questionText}</h2></div>
+                                    </div>
+                                    <div className="my-8 py-8 bg-black/40 border-y border-slate-700 text-center relative font-mono flex flex-col justify-center items-center gap-2">
+                                        {(missionStep > 0 && (currentQ.type === 'gradient' || currentQ.type === 'turning_point' || currentQ.type === 'nature')) && (
+                                            <div className="absolute top-2 right-2 flex gap-2"><div className="bg-green-900/50 text-green-400 border border-green-700 text-[10px] px-2 py-1 uppercase tracking-widest">dy/dx Verified</div></div>
+                                        )}
+                                        <span className="text-3xl md:text-5xl text-blue-400 tracking-wider drop-shadow-lg filter shadow-blue-500/50">{currentQ.equation}</span>
+                                        <div className="w-full flex flex-col items-center gap-2 mt-4">
+                                            {(missionStep > 0 && (currentQ.type === 'gradient' || currentQ.type === 'turning_point' || currentQ.type === 'nature')) && (
+                                                <div className="animate-fade-in border-t border-slate-700/50 pt-2 w-full">
+                                                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">DERIVATIVE DATA (dy/dx)</p>
+                                                    <span className="text-xl text-green-400 tracking-wider font-bold shadow-green-500/20 drop-shadow-md">{currentQ.answer_deriv}</span>
+                                                </div>
+                                            )}
+                                            {(missionStep > 1 && currentQ.type === 'turning_point') && (
+                                                <div className="animate-fade-in border-t border-slate-700/50 pt-2 w-full">
+                                                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">TURN LOCATION (x)</p>
+                                                    <span className="text-xl text-yellow-400 tracking-wider font-bold shadow-yellow-500/20 drop-shadow-md">x = {currentQ.answer_val}</span>
+                                                </div>
+                                            )}
+                                            {(missionStep > 1 && currentQ.type === 'nature') && (
+                                                <div className="animate-fade-in border-t border-slate-700/50 pt-2 w-full">
+                                                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">2ND DERIVATIVE (d²y/dx²)</p>
+                                                    <span className="text-xl text-yellow-400 tracking-wider font-bold shadow-yellow-500/20 drop-shadow-md">{currentQ.answer_second_deriv}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-4 max-w-md mx-auto">
+                                        {!feedback ? (
+                                            <>
+                                                {isNatureFinal ? (
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <button onClick={() => setInputAns('min')} className={`py-4 rounded-sm border font-mono font-bold transition uppercase tracking-widest ${inputAns === 'min' ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700'}`}>Lembah (Min)</button>
+                                                        <button onClick={() => setInputAns('max')} className={`py-4 rounded-sm border font-mono font-bold transition uppercase tracking-widest ${inputAns === 'max' ? 'bg-red-600 border-red-400 text-white' : 'bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700'}`}>Puncak (Max)</button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="relative group">
+                                                         {isDerivStep && <p className="text-[10px] font-mono text-slate-500 uppercase mb-1 ml-1 tracking-widest">{txt.deriv_label}</p>}
+                                                         {isCoordStep && <p className="text-[10px] font-mono text-slate-500 uppercase mb-1 ml-1 tracking-widest">{txt.coord_label}</p>}
+                                                         {(currentQ.type === 'nature' && missionStep === 1) && <p className="text-[10px] font-mono text-slate-500 uppercase mb-1 ml-1 tracking-widest">{txt.second_deriv_label}</p>}
+                                                        <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400">>_</div>
+                                                        <input type={inputType} value={inputAns} onChange={(e) => setInputAns(e.target.value)} className="w-full bg-black/30 border border-slate-600 rounded-sm py-4 pl-10 pr-4 text-center text-2xl font-mono text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50 placeholder-slate-700 transition-all" placeholder={placeholder} autoFocus />
+                                                    </div>
+                                                )}
+                                                <button onClick={checkAnswer} disabled={!inputAns} className="w-full bg-blue-700 hover:bg-blue-600 text-white font-bold py-3 rounded-sm shadow-lg transition disabled:opacity-50 uppercase tracking-widest font-mono mt-4 border-b-4 border-blue-900 active:border-b-0 active:translate-y-1">{txt.submit}</button>
+                                            </>
+                                        ) : (
+                                            <div className="animate-fade-in">
+                                                <div className={`p-4 rounded-sm mb-4 flex items-center gap-4 border ${feedback.type === 'success' ? 'bg-green-900/20 border-green-500/30 text-green-300' : 'bg-red-900/20 border-red-500/30 text-red-300'}`}>
+                                                    {feedback.type === 'success' ? <Icons.CheckCircle /> : <Icons.XCircle />}
+                                                    <span className="font-mono text-sm tracking-wide font-bold">{feedback.msg}</span>
+                                                </div>
+                                                <button onClick={nextAction} className="w-full bg-slate-200 hover:bg-white text-slate-900 font-bold py-3 rounded-sm shadow-lg transition flex justify-center items-center gap-2 uppercase tracking-widest font-mono"><span>{txt.next}</span> <Icons.ArrowRight width={16} /></button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                };
+
+                const renderResult = () => (
+                    <div className="w-full max-w-md text-center animate-scale-in relative z-10">
+                        <div className="bg-slate-800/90 backdrop-blur-md p-8 rounded-sm border border-slate-500 shadow-2xl relative">
+                            <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-slate-900 p-2 rounded-full border border-slate-500"><Icons.Badge width={48} height={48} className="text-yellow-500" /></div>
+                            <h2 className="text-3xl font-bold mb-2 mt-8 font-mono tracking-tighter text-white">{txt.gameOver}</h2>
+                            <p className="text-slate-400 mb-8 font-mono text-xs uppercase tracking-widest">{playerName}, {lang === 'ms' ? 'LAPORAN PRESTASI' : 'PERFORMANCE REPORT'}:</p>
+                            <div className="mb-8 p-6 bg-black/30 border border-slate-700 rounded-sm">
+                                 <span className="text-5xl font-bold font-mono text-blue-400">{percentage}%</span>
+                                 <div className="text-[10px] text-slate-500 uppercase mt-2 tracking-[0.2em]">{txt.score}</div>
+                            </div>
+                            <div className="space-y-3">
+                                <button onClick={() => setGameState('leaderboard')} className="w-full bg-gradient-to-r from-yellow-600 to-amber-700 text-white font-bold py-3 rounded-sm shadow-lg transition hover:brightness-110 uppercase font-mono text-sm tracking-wider border border-yellow-500/30">{txt.viewLeaderboard}</button>
+                                <button onClick={() => { setGameState('welcome'); setPlayerName(''); }} className="w-full bg-slate-700 hover:bg-slate-600 font-semibold py-3 rounded-sm transition flex justify-center items-center gap-2 uppercase font-mono text-sm border border-slate-600"><Icons.RotateCcw width={14} /> {txt.playAgain}</button>
+                            </div>
+                        </div>
+                    </div>
+                );
+
+                const renderLeaderboard = () => (
+                    <div className="w-full max-w-md animate-fade-in relative z-10">
+                        <div className="bg-slate-800/90 backdrop-blur-md rounded-sm border border-slate-600 shadow-2xl overflow-hidden">
+                            <div className="p-5 border-b border-slate-700 flex items-center justify-between bg-slate-900/50">
+                                <h2 className="text-lg font-bold flex items-center gap-2 font-mono uppercase tracking-wider text-blue-300"><Icons.Badge width={18} className="text-yellow-500" /> {txt.leaderboardTitle}</h2>
+                                <button onClick={() => setGameState('welcome')} className="text-slate-500 hover:text-white transition"><Icons.XCircle /></button>
+                            </div>
+                            <div className="p-4 space-y-2">
+                                {loadingLB ? <div className="p-8 text-center text-slate-500 font-mono text-sm animate-pulse">{txt.loading}</div> :
+                                leaderboard.length === 0 ? <div className="p-8 text-center text-slate-500 italic font-mono text-xs">NO AGENT RECORDS FOUND.</div> :
+                                leaderboard.map((entry, idx) => (
+                                    <div key={idx} className="flex justify-between items-center bg-slate-900/40 p-3 rounded-sm border border-slate-700/50 hover:border-slate-500 transition">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`w-6 h-6 rounded-sm flex items-center justify-center font-mono font-bold text-xs ${idx===0?'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50':idx===1?'bg-slate-400/20 text-slate-300 border border-slate-400/50':idx===2?'bg-amber-600/20 text-amber-500 border border-amber-600/50':'bg-slate-700 text-slate-500'}`}>{idx+1}</div>
+                                            <div className="flex flex-col"><span className="font-mono text-sm font-bold text-slate-300 uppercase">{entry.name}</span><span className="text-[10px] text-slate-500 font-mono">{entry.lang==='ms'?'MY':'EN'}</span></div>
+                                        </div>
+                                        <span className="text-lg font-bold font-mono text-blue-400">{entry.score}%</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="p-4 bg-slate-900/80 border-t border-slate-700"><button onClick={() => setGameState('welcome')} className="w-full text-slate-400 hover:text-white text-xs font-mono uppercase tracking-widest">{txt.back}</button></div>
+                        </div>
+                    </div>
+                );
+
+                return (
+                    <div className="w-full min-h-screen flex flex-col items-center justify-center">
+                         {gameState === 'welcome' && renderWelcome()}
+                         {gameState === 'playing' && renderGame()}
+                         {gameState === 'result' && renderResult()}
+                         {gameState === 'leaderboard' && renderLeaderboard()}
+                    </div>
+                );
+            }
+
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<CalculusGame />);
+        } // End of startApp
+
+        // Start the process
+        waitForFirebase();
+    </script>
+</body>
+</html>
